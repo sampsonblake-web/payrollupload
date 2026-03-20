@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Payroll Roll-up Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
+    <style>
+        body { font-size: 13px; }
+        .store-credit-header { background-color: #fef3c7; border-left: 3px solid #f59e0b; }
+        .division-header { background-color: #e0f2fe; border-left: 3px solid #0ea5e9; }
+        
+        /* Filter Button States */
+        .filter-btn { background-color: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0; transition: all 0.2s; }
+        .filter-btn:hover { background-color: #e2e8f0; }
+        .filter-btn.active { background-color: #2563eb; color: white; border-color: #1d4ed8; box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2); }
+        
+        .font-mono { font-family: ui-monospace, monospace; letter-spacing: -0.02em; }
+        .modal { display: none; position: fixed; z-index: 50; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); }
+        .modal.active { display: flex; }
+        
+        .compact-table th, .compact-table td { padding: 8px 10px !important; }
+
+        .variance-up { color: #dc2626; font-weight: 800; }
+        .variance-down { color: #16a34a; font-weight: 800; }
+        .dashboard-card { border-radius: 8px; border: 1px solid #f1f5f9; padding: 10px; background: #fff; }
+        
+        .edit-trigger { color: #2563eb; font-weight: 800; text-transform: uppercase; font-size: 9px; padding: 4px 8px; border-radius: 4px; background: #eff6ff; border: 1px solid #dbeafe; }
+        .app-input { width: 100%; background: #fff; border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px 10px; font-size: 13px; }
+        
+        .text-overtime { color: #dc2626; }
+
+        .salary-badge { background-color: #fee2e2; color: #dc2626; font-size: 8px; font-weight: 900; padding: 2px 6px; border-radius: 9999px; text-transform: uppercase; margin-left: 8px; border: 1px solid #fecaca; display: inline-block; vertical-align: middle; }
+
+        /* Week color bands */
+        .w1-cell { background-color: #eff6ff; }
+        .w2-cell { background-color: #f0fdf4; }
+        .w1-head { background-color: #dbeafe !important; color: #1d4ed8 !important; }
+        .w2-head { background-color: #bbf7d0 !important; color: #15803d !important; }
+
+        /* Salary toggle */
+        .salary-row-hidden { display: none; }
+        .sal-toggle-btn { transition: all 0.2s; }
+        .sal-toggle-btn.hiding-sal { background-color: #dc2626; color: white; border-color: #b91c1c; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800 min-h-screen">
+
+    <div class="container mx-auto py-6 px-2">
+        <header class="mb-6 flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
+            <div>
+                <h1 class="text-2xl font-black text-gray-900 leading-none">Payroll <span class="text-blue-600">Roll-Up</span></h1>
+                <p class="text-[11px] text-gray-500 font-bold uppercase tracking-wider mt-1">2-Week Comparison & Variance Analysis</p>
+            </div>
+            <div class="flex flex-wrap gap-2 items-center">
+                <div class="bg-white p-2 rounded border shadow-sm flex gap-4">
+                    <div class="flex flex-col">
+                        <label class="text-[9px] font-black text-blue-600 uppercase">Week 1 File</label>
+                        <input type="file" onchange="handleFileUpload(event, 1)" class="text-[10px] text-gray-500 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-[9px] file:font-bold file:bg-blue-50 file:text-blue-700">
+                    </div>
+                    <div class="flex flex-col">
+                        <label class="text-[9px] font-black text-gray-400 uppercase">Week 2 File</label>
+                        <input type="file" onchange="handleFileUpload(event, 2)" class="text-[10px] text-gray-500 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-[9px] file:font-bold file:bg-gray-100 file:text-gray-700">
+                    </div>
+                </div>
+                <div class="flex gap-1 ml-2">
+                    <button onclick="exportCSV()" class="bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded font-bold hover:bg-gray-50 text-[11px]">CSV</button>
+                    <button onclick="exportPDF()" class="bg-red-600 text-white px-3 py-2 rounded font-bold hover:bg-red-700 text-[11px] shadow-sm">PDF</button>
+                    <button onclick="toggleSalary()" id="salToggleBtn" class="sal-toggle-btn bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded font-bold hover:bg-gray-50 text-[11px]">Hide Salary</button>
+                    <button onclick="openDirectory()" id="empBtn" class="relative bg-gray-800 text-white px-3 py-2 rounded font-bold hover:bg-gray-700 text-[11px]">
+                        Employees
+                        <span id="newEmpBadge" class="hidden absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] font-black rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 shadow"></span>
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <div id="filterSection" class="mb-6 hidden bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+            <div class="flex justify-between items-center mb-3">
+                <span class="text-[10px] font-black text-gray-400 uppercase tracking-widest">Filter by Division</span>
+                <div class="flex gap-2">
+                    <button onclick="filterAll(true)" class="text-[10px] font-bold text-blue-600 hover:underline uppercase">Select All</button>
+                    <span class="text-gray-300">|</span>
+                    <button onclick="filterAll(false)" class="text-[10px] font-bold text-gray-400 hover:underline uppercase">Clear All</button>
+                </div>
+            </div>
+            <div id="filterButtons" class="flex flex-wrap gap-2"></div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-5 gap-6">
+            <div class="lg:col-span-1">
+                <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200 sticky top-4 overflow-hidden">
+                    <h2 class="text-xs font-black mb-4 border-b pb-1 text-blue-900 uppercase tracking-widest">Period Dashboard</h2>
+                    <div id="summaryStats" class="space-y-3">
+                        <p class="text-[11px] italic text-gray-400 text-center py-10">Upload Week 1 to begin calculations.</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="lg:col-span-4 space-y-4" id="employeeDisplay"></div>
+        </div>
+    </div>
+
+    <div id="directoryModal" class="modal items-center justify-center p-4">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
+            <div class="p-4 border-b flex justify-between items-center bg-gray-50">
+                <h2 class="text-lg font-black text-gray-800 uppercase">Employee Directory</h2>
+                <button onclick="closeDirectory()" class="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
+            </div>
+            <div class="p-3 bg-blue-50 border-b grid grid-cols-2 md:grid-cols-5 gap-2 items-end">
+                <div><label class="block text-[9px] font-bold text-blue-900 uppercase">Name</label><input type="text" id="newEmpName" class="w-full border rounded p-1.5 text-xs"></div>
+                <div><label class="block text-[9px] font-bold text-blue-900 uppercase">Division</label><input type="text" id="newEmpDiv" class="w-full border rounded p-1.5 text-xs"></div>
+                <div><label class="block text-[9px] font-bold text-blue-900 uppercase">Type</label>
+                    <select id="newEmpType" class="w-full border rounded p-1.5 text-xs bg-white"><option value="Hourly">Hourly</option><option value="Salary">Salary</option></select>
+                </div>
+                <div><label class="block text-[9px] font-bold text-blue-900 uppercase">Rate</label><input type="number" id="newEmpRate" step="0.01" class="w-full border rounded p-1.5 text-xs"></div>
+                <button onclick="addManualEmployee()" class="bg-blue-600 text-white px-3 py-1.5 rounded font-bold text-xs uppercase">Add</button>
+            </div>
+            <div class="p-4 overflow-y-auto">
+                <table class="w-full text-left text-[11px]"><tbody id="directoryTableBody" class="divide-y"></tbody></table>
+            </div>
+            <div class="p-3 bg-gray-50 border-t flex justify-end"><button onclick="closeDirectory()" class="bg-blue-600 text-white px-6 py-1.5 rounded font-bold text-xs uppercase">Save Changes</button></div>
+        </div>
+    </div>
+
+    <div id="hourEditModal" class="modal items-center justify-center p-4">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col">
+            <div class="p-5 border-b bg-gray-50"><h2 class="text-lg font-black text-gray-800 uppercase" id="editHeaderName">Edit Hours</h2></div>
+            <div class="p-6 space-y-4">
+                <input type="hidden" id="editTargetName">
+                <input type="hidden" id="editTargetDept">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="text-[10px] font-black uppercase text-gray-400">W1 Reg</label>
+                        <input type="number" id="editW1Reg" step="0.1" class="app-input text-lg font-mono">
+                    </div>
+                    <div>
+                        <label class="text-[10px] font-black uppercase text-red-400">W1 OT</label>
+                        <input type="number" id="editW1OT" step="0.1" class="app-input text-lg font-mono text-red-600 border-red-200">
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="text-[10px] font-black uppercase text-gray-400">W2 Reg</label>
+                        <input type="number" id="editW2Reg" step="0.1" class="app-input text-lg font-mono">
+                    </div>
+                    <div>
+                        <label class="text-[10px] font-black uppercase text-red-400">W2 OT</label>
+                        <input type="number" id="editW2OT" step="0.1" class="app-input text-lg font-mono text-red-600 border-red-200">
+                    </div>
+                </div>
+            </div>
+            <div class="p-4 border-t flex gap-2">
+                <button onclick="document.getElementById('hourEditModal').classList.remove('active')" class="flex-1 py-2 font-bold uppercase text-xs">Cancel</button>
+                <button onclick="saveHourUpdate()" class="flex-1 bg-blue-600 text-white py-2 rounded font-black text-xs uppercase">Update</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let masterList = JSON.parse(localStorage.getItem('payroll_master_v20')) || [];
+        let week1Raw = null, week2Raw = null;
+        let activeFilters = new Set();
+        let currentGroupedData = {};
+        let processedDataList = [];
+        let availableDivisions = [];
+        let newEmployeeCount = 0;
+        let hideSalary = false;
+
+        // Aggressive normalization: "Musser, Tyler J" and "Tyler Musser" both become "musser tyler"
+        function normalizeName(s) {
+            if (!s) return "";
+            return s.toLowerCase()
+                .replace(/[^a-z0-9\s]/g, " ")
+                .split(/\s+/)
+                .filter(word => word.length > 1) 
+                .sort()
+                .join(" ");
+        }
+
+        // Better department matching using codes
+        function matchDept(masterDept, excelDept) {
+            if (!masterDept || !excelDept) return false;
+            let m = masterDept.toLowerCase().trim();
+            let e = excelDept.toLowerCase().trim();
+            if (e.includes(m) || m.includes(e)) return true;
+            
+            // Match first word code (e.g., "300" in "300-National...")
+            let eCode = e.split(/[-\s]/)[0];
+            return eCode === m;
+        }
+
+        function handleFileUpload(event, weekNum) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const workbook = XLSX.read(e.target.result, { type: 'binary' });
+                const rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 });
+                if (weekNum === 1) week1Raw = rows; else week2Raw = rows;
+                processData();
+            };
+            reader.readAsBinaryString(file);
+        }
+
+        function extractWeekData(rows) {
+            if (!rows) return [];
+            let headerIdx = -1;
+            for (let i = 0; i < Math.min(rows.length, 20); i++) {
+                if (rows[i] && rows[i].some(c => String(c).toLowerCase().includes('employee'))) { headerIdx = i; break; }
+            }
+            if (headerIdx === -1) return [];
+
+            const h = rows[headerIdx].map(val => String(val || "").toLowerCase().trim());
+            const colMap = {
+                emp: h.findIndex(s => s.includes('employee')),
+                dept: h.findIndex(s => s.includes('department')),
+                reg: h.findIndex(s => s === 'regular' || s === 'reg'),
+                sal: h.findIndex(s => s.includes('salary')),
+                ot: h.findIndex(s => s === 'ot' || s === 'overtime' || s.includes('o.t.')),
+                vac: h.findIndex(s => s.includes('vacation') || s === 'vac')
+            };
+
+            // Parse exactly as the Excel is laid out: division by division, row by row.
+            // Each section header becomes a division. Each employee row under it is one
+            // entry in that division. Same employee in two divisions = two separate entries.
+            // This is the source of truth — the app mirrors the Excel exactly.
+            let currentDivision = "Unassigned";
+            let results = [];
+            for (let i = headerIdx + 1; i < rows.length; i++) {
+                const row = rows[i];
+                if (!row) continue;
+                const col0 = row[colMap.emp] ? String(row[colMap.emp]).trim() : null;
+                if (!col0) continue; // subtotal / blank row
+
+                const deptCol = colMap.dept !== -1 ? (row[colMap.dept] ? String(row[colMap.dept]).trim() : null) : null;
+                const hasHours = row[colMap.reg] || row[colMap.ot] || row[colMap.sal] || row[colMap.vac];
+
+                // Division header: name in col0, no dept column, no hours
+                if (!deptCol && !hasHours) {
+                    currentDivision = col0;
+                    continue;
+                }
+
+                const reg = colMap.reg !== -1 ? (parseFloat(row[colMap.reg]) || 0) : 0;
+                const sal = colMap.sal !== -1 ? (parseFloat(row[colMap.sal]) || 0) : 0;
+                const ot  = colMap.ot  !== -1 ? (parseFloat(row[colMap.ot])  || 0) : 0;
+                const vac = colMap.vac !== -1 ? (parseFloat(row[colMap.vac]) || 0) : 0;
+                results.push({ name: col0, reg, sal, ot, vac, excelDept: currentDivision });
+            }
+            return results;
+        }
+
+        function processData() {
+            const w1 = extractWeekData(week1Raw);
+            const w2 = extractWeekData(week2Raw);
+
+            // Build a lookup for rates/type from master list by name+dept key.
+            // Master list is only used for pay rates — the Excel is the source of truth
+            // for who appears in which division with how many hours.
+            const masterLookup = {};
+            masterList.forEach(m => {
+                const key = normalizeName(m.name) + '||' + m.dept.toLowerCase();
+                masterLookup[key] = m;
+            });
+
+            // Collect every unique name+division combo seen across both weeks.
+            // Preserve the order divisions appear in the Excel (w1 first, then any new ones from w2).
+            const divisionOrder = [];
+            const allEntries = {}; // key -> { name, dept, w1data, w2data }
+
+            const registerEntries = (list, week) => {
+                list.forEach(e => {
+                    const key = normalizeName(e.name) + '||' + e.excelDept.toLowerCase();
+                    if (!allEntries[key]) {
+                        if (!divisionOrder.includes(e.excelDept)) divisionOrder.push(e.excelDept);
+                        allEntries[key] = { name: e.name, dept: e.excelDept, w1: null, w2: null };
+                    }
+                    allEntries[key][week] = e;
+                });
+            };
+            registerEntries(w1, 'w1');
+            registerEntries(w2, 'w2');
+
+            // Auto-populate master list from Excel — always check for new employees
+            newEmployeeCount = 0;
+            Object.values(allEntries).forEach(e => {
+                const key = normalizeName(e.name) + '||' + e.dept.toLowerCase();
+                if (!masterLookup[key]) {
+                    const newEmp = { name: e.name, dept: e.dept, rate: 0, type: 'Hourly', isNew: true };
+                    masterList.push(newEmp);
+                    masterLookup[key] = newEmp;
+                    newEmployeeCount++;
+                }
+            });
+            if (newEmployeeCount > 0) saveMaster();
+
+            // Also inject manually added master employees who have no Excel rows yet
+            // so they still show up in the table (salary = 40hrs, hourly = 0hrs until file has them)
+            masterList.forEach(m => {
+                const key = normalizeName(m.name) + '||' + m.dept.toLowerCase();
+                if (!allEntries[key]) {
+                    if (!divisionOrder.includes(m.dept)) divisionOrder.push(m.dept);
+                    allEntries[key] = { name: m.name, dept: m.dept, w1: null, w2: null };
+                }
+            });
+
+            processedDataList = [];
+            const divs = new Set();
+
+            Object.values(allEntries).forEach(entry => {
+                const key = normalizeName(entry.name) + '||' + entry.dept.toLowerCase();
+                const master = masterLookup[key] || { rate: 0, type: 'Hourly' };
+
+                const calc = (weekData, fileWasUploaded) => {
+                    // Salary: always 40hrs per week as long as a file was uploaded,
+                    // even if they have no rows in that week's Excel
+                    if (master.type === 'Salary') {
+                        if (!fileWasUploaded) return { reg: 0, ot: 0, vac: 0, pay: 0 };
+                        return { reg: 40, ot: 0, vac: 0, pay: 40 * master.rate };
+                    }
+                    if (!fileWasUploaded || !weekData) return { reg: 0, ot: 0, vac: 0, pay: 0 };
+                    const regHrs = weekData.reg + weekData.sal;
+                    const otHrs  = weekData.ot;
+                    const vacHrs = weekData.vac;
+                    const pay = (regHrs * master.rate) + (otHrs * master.rate * 1.5) + (vacHrs * master.rate);
+                    return { reg: regHrs, ot: otHrs, vac: vacHrs, pay };
+                };
+
+                const r1 = calc(entry.w1, week1Raw !== null);
+                const r2 = calc(entry.w2, week2Raw !== null);
+
+                processedDataList.push({
+                    name: entry.name, dept: entry.dept,
+                    rate: master.rate, type: master.type,
+                    w1Reg: r1.reg, w1OT: r1.ot, w1Vac: r1.vac, w1Pay: r1.pay,
+                    w2Reg: r2.reg, w2OT: r2.ot, w2Vac: r2.vac, w2Pay: r2.pay,
+                    totalHrs: r1.reg + r1.ot + r1.vac + r2.reg + r2.ot + r2.vac,
+                    totalPay: r1.pay + r2.pay
+                });
+                divs.add(entry.dept);
+            });
+
+            availableDivisions = Array.from(divs);
+            saveMaster();
+            if (activeFilters.size === 0) activeFilters = new Set(availableDivisions);
+            setupFilters();
+            render();
+            // Update the new-employee badge on the Employees button
+            const badge = document.getElementById('newEmpBadge');
+            if (badge) {
+                if (newEmployeeCount > 0) {
+                    badge.textContent = newEmployeeCount;
+                    badge.classList.remove('hidden');
+                } else {
+                    badge.classList.add('hidden');
+                }
+            }
+        }
+
+        function filterAll(select) {
+            if (select) activeFilters = new Set(availableDivisions);
+            else activeFilters.clear();
+            setupFilters();
+            render();
+        }
+
+        function openEditHours(name, dept) {
+            const emp = processedDataList.find(e => e.name === name && e.dept === dept);
+            if (!emp) return;
+            document.getElementById('editTargetName').value = name;
+            document.getElementById('editTargetDept').value = dept;
+            document.getElementById('editHeaderName').innerText = `${name} (${dept})`;
+            document.getElementById('editW1Reg').value = emp.w1Reg.toFixed(1);
+            document.getElementById('editW1OT').value = emp.w1OT.toFixed(1);
+            document.getElementById('editW2Reg').value = emp.w2Reg.toFixed(1);
+            document.getElementById('editW2OT').value = emp.w2OT.toFixed(1);
+            document.getElementById('hourEditModal').classList.add('active');
+        }
+
+        function saveHourUpdate() {
+            const name = document.getElementById('editTargetName').value;
+            const dept = document.getElementById('editTargetDept').value;
+            const w1R = parseFloat(document.getElementById('editW1Reg').value) || 0;
+            const w1O = parseFloat(document.getElementById('editW1OT').value) || 0;
+            const w2R = parseFloat(document.getElementById('editW2Reg').value) || 0;
+            const w2O = parseFloat(document.getElementById('editW2OT').value) || 0;
+            
+            const emp = processedDataList.find(e => e.name === name && e.dept === dept);
+            if (emp) {
+                emp.w1Reg = w1R; emp.w1OT = w1O;
+                emp.w1Pay = (w1R * emp.rate) + (w1O * emp.rate * 1.5);
+                emp.w2Reg = w2R; emp.w2OT = w2O;
+                emp.w2Pay = (w2R * emp.rate) + (w2O * emp.rate * 1.5);
+                emp.totalHrs = w1R + w1O + w2R + w2O;
+                emp.totalPay = emp.w1Pay + emp.w2Pay;
+                render();
+            }
+            document.getElementById('hourEditModal').classList.remove('active');
+        }
+
+        function toggleSalary() {
+            hideSalary = !hideSalary;
+            const btn = document.getElementById('salToggleBtn');
+            btn.textContent = hideSalary ? 'Show Salary' : 'Hide Salary';
+            btn.classList.toggle('hiding-sal', hideSalary);
+            render();
+        }
+
+        function render() {
+            const container = document.getElementById('employeeDisplay');
+            container.innerHTML = '';
+            const filtered = processedDataList.filter(d => activeFilters.has(d.dept) && !(hideSalary && d.type === 'Salary'));
+            const hasW1 = week1Raw !== null;
+            const hasW2 = week2Raw !== null;
+
+            currentGroupedData = filtered.reduce((acc, item) => {
+                if (!acc[item.dept]) acc[item.dept] = { emps: [], tPay: 0, t1Pay: 0, t2Pay: 0, t1Hrs: 0, t2Hrs: 0, t1Reg: 0, t1OT: 0, t1Vac: 0, t2Reg: 0, t2OT: 0, t2Vac: 0, tHrs: 0 };
+                acc[item.dept].emps.push(item);
+                acc[item.dept].tPay  += item.totalPay;
+                acc[item.dept].tHrs  += item.totalHrs;
+                acc[item.dept].t1Pay += item.w1Pay;
+                acc[item.dept].t2Pay += item.w2Pay;
+                acc[item.dept].t1Hrs += (item.w1Reg + item.w1OT + item.w1Vac);
+                acc[item.dept].t2Hrs += (item.w2Reg + item.w2OT + item.w2Vac);
+                acc[item.dept].t1Reg += item.w1Reg;
+                acc[item.dept].t1OT  += item.w1OT;
+                acc[item.dept].t1Vac += item.w1Vac;
+                acc[item.dept].t2Reg += item.w2Reg;
+                acc[item.dept].t2OT  += item.w2OT;
+                acc[item.dept].t2Vac += item.w2Vac;
+                return acc;
+            }, {});
+
+            Object.keys(currentGroupedData).sort().forEach(dept => {
+                const g = currentGroupedData[dept];
+                container.innerHTML += `
+                    <div class="bg-white rounded-lg shadow-sm border border-gray-200 mb-4 overflow-hidden">
+                        <div class="px-3 py-2 ${dept.includes('STORE CREDIT') || dept.includes('SC') ? 'store-credit-header' : 'division-header'} flex justify-between items-center border-b">
+                            <span class="font-black text-[11px] text-gray-800 uppercase">${dept}</span>
+                            <span class="font-mono text-[10px] font-bold text-gray-600">Period: $${g.tPay.toLocaleString(undefined,{minimumFractionDigits:2})}</span>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left compact-table">
+                                <thead class="bg-gray-50 text-gray-400 uppercase text-[9px] font-black border-b">
+                                    <tr>
+                                        <th class="w-1/4">Employee</th>
+                                        ${hasW1 ? '<th class="text-right w1-head">W1 Reg</th><th class="text-right w1-head">W1 OT</th><th class="text-right w1-head">W1 Vac</th><th class="text-right w1-head">W1 Pay</th>' : ''}
+                                        ${hasW2 ? '<th class="text-right w2-head">W2 Reg</th><th class="text-right w2-head">W2 OT</th><th class="text-right w2-head">W2 Vac</th><th class="text-right w2-head">W2 Pay</th>' : ''}
+                                        <th class="text-right bg-blue-50/50">Total Hrs</th>
+                                        <th class="text-right bg-blue-50/50">Total Pay</th>
+                                        <th class="w-16"></th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y text-[11px]">
+                                    ${g.emps.sort((a,b)=>a.name.localeCompare(b.name)).map(e => `
+                                        <tr class="hover:bg-gray-50/50 transition-colors">
+                                            <td class="font-bold text-gray-700">
+                                                ${e.name}
+                                                ${e.type === 'Salary' ? '<span class="salary-badge">Salary</span>' : ''}
+                                            </td>
+                                            ${hasW1 ? `
+                                                <td class="text-right font-mono text-blue-700 w1-cell">${e.w1Reg.toFixed(2)}</td>
+                                                <td class="text-right font-mono text-red-500 w1-cell">${e.w1OT.toFixed(2)}</td>
+                                                <td class="text-right font-mono text-blue-400 w1-cell">${e.w1Vac.toFixed(2)}</td>
+                                                <td class="text-right font-mono font-bold text-blue-800 w1-cell">$${e.w1Pay.toFixed(2)}</td>` : ''}
+                                            ${hasW2 ? `
+                                                <td class="text-right font-mono text-green-700 w2-cell">${e.w2Reg.toFixed(2)}</td>
+                                                <td class="text-right font-mono text-red-500 w2-cell">${e.w2OT.toFixed(2)}</td>
+                                                <td class="text-right font-mono text-green-400 w2-cell">${e.w2Vac.toFixed(2)}</td>
+                                                <td class="text-right font-mono font-bold text-green-800 w2-cell">$${e.w2Pay.toFixed(2)}</td>` : ''}
+                                            <td class="text-right font-mono font-bold text-gray-600">${e.totalHrs.toFixed(2)}</td>
+                                            <td class="text-right font-mono font-bold text-blue-700">$${e.totalPay.toFixed(2)}</td>
+                                            <td class="text-right"><button onclick="openEditHours('${e.name}', '${e.dept}')" class="edit-trigger">Edit</button></td>
+                                        </tr>
+                                    `).join('')}
+                                    <tr class="bg-gray-100 border-t-2 border-gray-300 font-black text-[11px]">
+                                        <td class="py-2 px-2 text-gray-700 uppercase text-[9px] tracking-wider">Total</td>
+                                        ${hasW1 ? `
+                                            <td class="text-right font-mono font-black text-blue-800 w1-cell">${g.t1Reg.toFixed(2)}</td>
+                                            <td class="text-right font-mono font-black text-red-600 w1-cell">${g.t1OT.toFixed(2)}</td>
+                                            <td class="text-right font-mono font-black text-blue-400 w1-cell">${g.t1Vac.toFixed(2)}</td>
+                                            <td class="text-right font-mono font-black text-blue-900 w1-cell">$${g.t1Pay.toFixed(2)}</td>` : ''}
+                                        ${hasW2 ? `
+                                            <td class="text-right font-mono font-black text-green-800 w2-cell">${g.t2Reg.toFixed(2)}</td>
+                                            <td class="text-right font-mono font-black text-red-600 w2-cell">${g.t2OT.toFixed(2)}</td>
+                                            <td class="text-right font-mono font-black text-green-400 w2-cell">${g.t2Vac.toFixed(2)}</td>
+                                            <td class="text-right font-mono font-black text-green-900 w2-cell">$${g.t2Pay.toFixed(2)}</td>` : ''}
+                                        <td class="text-right font-mono text-gray-700">${g.tHrs.toFixed(2)}</td>
+                                        <td class="text-right font-mono text-blue-700">$${g.tPay.toFixed(2)}</td>
+                                        <td></td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                `;
+            });
+
+            const s = filtered.reduce((acc, e) => { 
+                acc.h1 += (e.w1Reg + e.w1OT); acc.h2 += (e.w2Reg + e.w2OT); acc.p1 += e.w1Pay; acc.p2 += e.w2Pay; 
+                return acc; 
+            }, {h1:0, h2:0, p1:0, p2:0});
+
+            let dashHtml = '';
+            if (hasW1) {
+                dashHtml += `
+                <div class="dashboard-card border-l-4 border-l-blue-400">
+                    <p class="text-[9px] font-black text-gray-400 uppercase">Week 1 Total</p>
+                    <p class="text-lg font-black text-gray-700">$${s.p1.toLocaleString(undefined, {minimumFractionDigits:2})}</p>
+                    <p class="text-[10px] font-bold text-gray-400">${s.h1.toFixed(1)} Hours</p>
+                </div>`;
+            }
+            if (hasW2) {
+                dashHtml += `
+                <div class="dashboard-card border-l-4 border-l-indigo-400">
+                    <p class="text-[9px] font-black text-gray-400 uppercase">Week 2 Total</p>
+                    <p class="text-lg font-black text-gray-700">$${s.p2.toLocaleString(undefined, {minimumFractionDigits:2})}</p>
+                    <p class="text-[10px] font-bold text-gray-400">${s.h2.toFixed(1)} Hours</p>
+                </div>`;
+            }
+            if (hasW1 && hasW2) {
+                const hDiff = s.h2 - s.h1; const pDiff = s.p2 - s.p1;
+                dashHtml += `
+                <div class="dashboard-card bg-blue-600 text-white shadow-lg">
+                    <p class="text-[9px] font-black opacity-70 uppercase">Combined Period</p>
+                    <p class="text-xl font-black">$${(s.p1 + s.p2).toLocaleString(undefined, {minimumFractionDigits:2})}</p>
+                    <p class="text-[10px] font-bold opacity-70">${(s.h1 + s.h2).toFixed(1)} Total Hours</p>
+                </div>
+                <div class="pt-2">
+                    <p class="text-[9px] font-black text-gray-400 uppercase mb-2">Variance (W1 vs W2)</p>
+                    <div class="space-y-1 bg-gray-50 p-2 rounded border border-gray-100">
+                        <div class="flex justify-between items-center">
+                            <span class="text-[9px] font-bold text-gray-400 uppercase">Spend Diff</span>
+                            <span class="${pDiff > 0 ? 'variance-up' : 'variance-down'} text-xs font-mono">${pDiff > 0 ? '+' : ''}$${Math.abs(pDiff).toLocaleString()}</span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-[9px] font-bold text-gray-400 uppercase">Hour Diff</span>
+                            <span class="${hDiff > 0 ? 'variance-up' : 'variance-down'} text-xs font-mono">${hDiff > 0 ? '+' : ''}${hDiff.toFixed(1)}</span>
+                        </div>
+                    </div>
+                </div>`;
+            }
+
+            document.getElementById('summaryStats').innerHTML = dashHtml;
+        }
+
+        function saveMaster() { localStorage.setItem('payroll_master_v20', JSON.stringify(masterList)); }
+        
+        function openDirectory() {
+            const body = document.getElementById('directoryTableBody'); body.innerHTML = '';
+            masterList.sort((a,b) => a.dept.localeCompare(b.dept) || a.name.localeCompare(b.name)).forEach((emp, idx) => {
+                const isNew = emp.isNew === true;
+                const rowClass = isNew ? 'bg-yellow-50 border-l-4 border-l-red-400' : '';
+                const newBadge = isNew ? '<span class="ml-1 bg-red-500 text-white text-[8px] font-black px-1.5 py-0.5 rounded-full uppercase">New</span>' : '';
+                body.innerHTML += `<tr class="${rowClass}"><td class="py-1.5 px-2"><div class="flex items-center"><input type="text" value="${emp.name}" onchange="updateEmp(${idx}, 'name', this.value)" class="editable-input font-bold w-full text-xs">${newBadge}</div></td><td class="py-1.5 px-2"><input type="text" value="${emp.dept}" onchange="updateEmp(${idx}, 'dept', this.value)" class="editable-input text-[10px] w-full text-gray-500"></td><td class="py-1.5 px-2"><select onchange="updateEmp(${idx}, 'type', this.value)" class="border rounded p-1 text-[10px]"><option value="Hourly" ${emp.type === 'Hourly' ? 'selected' : ''}>Hourly</option><option value="Salary" ${emp.type === 'Salary' ? 'selected' : ''}>Salary</option></select></td><td class="py-1.5 px-2"><input type="number" step="0.01" value="${emp.rate || 0}" onchange="updateEmp(${idx}, 'rate', this.value)" class="border rounded p-1 text-[10px] w-16 font-mono"></td><td class="py-1.5 px-2 text-right"><button onclick="deleteEmp(${idx})" class="text-red-400 text-lg">&times;</button></td></tr>`;
+            });
+            document.getElementById('directoryModal').style.display = 'flex';
+        }
+        function addManualEmployee() {
+            const n = document.getElementById('newEmpName').value, d = document.getElementById('newEmpDiv').value, r = parseFloat(document.getElementById('newEmpRate').value)||0, t = document.getElementById('newEmpType').value;
+            if(!n) return; masterList.push({name:n, dept:d||'Unassigned', rate:r, type:t}); saveMaster(); openDirectory(); processData();
+        }
+        function updateEmp(i, f, v) { 
+            masterList[i][f] = f==='rate'?parseFloat(v):v;
+            if (f === 'rate') masterList[i].isNew = false; // clear new flag once rate is set
+            saveMaster(); 
+            processData(); 
+        }
+        function deleteEmp(i) { 
+            if(confirm("Remove?")) { 
+                masterList.splice(i,1); 
+                saveMaster(); 
+                openDirectory(); 
+                processData(); 
+            } 
+        }
+        function closeDirectory() { document.getElementById('directoryModal').style.display='none'; processData(); }
+        
+        function setupFilters() {
+            const c = document.getElementById('filterButtons'); 
+            document.getElementById('filterSection').classList.remove('hidden'); 
+            c.innerHTML = '';
+            availableDivisions.forEach(div => {
+                const b = document.createElement('button'); 
+                b.innerText = div; 
+                b.className = `filter-btn ${activeFilters.has(div)?'active':''} px-3 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all`;
+                b.onclick = () => { 
+                    if(activeFilters.has(div)) activeFilters.delete(div); 
+                    else activeFilters.add(div); 
+                    setupFilters();
+                    render(); 
+                };
+                c.appendChild(b);
+            });
+        }
+
+        function exportCSV() {
+            let csv = "Division,Employee,Rate,W1 Reg,W1 OT,W1 Pay,W2 Reg,W2 OT,W2 Pay,Total Hrs,Total Pay\n";
+            Object.keys(currentGroupedData).forEach(d => { currentGroupedData[d].emps.forEach(e => {
+                csv += `"${d}","${e.name}",${e.rate},${e.w1Reg},${e.w1OT},${e.w1Pay},${e.w2Reg},${e.w2OT},${e.w2Pay},${e.totalHrs},${e.totalPay}\n`;
+            }); });
+            const blob = new Blob([csv], { type: 'text/csv' }); const a = document.createElement('a'); a.href = window.URL.createObjectURL(blob); a.download = "Payroll_Report.csv"; a.click();
+        }
+
+        function exportPDF() {
+            const { jsPDF } = window.jspdf;
+            const doc = jsPDF();
+            const date = new Date().toLocaleDateString();
+
+            doc.setFillColor(31, 41, 55); 
+            doc.rect(0, 0, 210, 40, 'F');
+            doc.setTextColor(255, 255, 255);
+            doc.setFontSize(22);
+            doc.setFont(undefined, 'bold');
+            doc.text("EXECUTIVE PAYROLL SUMMARY", 14, 20);
+            doc.setFontSize(10);
+            doc.setFont(undefined, 'normal');
+            doc.text(`Generated: ${date} | Periodic Variance Analysis`, 14, 28);
+
+            let currentY = 50;
+            doc.setTextColor(31, 41, 55);
+            doc.setFontSize(12);
+            doc.setFont(undefined, 'bold');
+            doc.text("1. DIVISIONAL VARIANCE DASHBOARD", 14, currentY);
+            currentY += 6;
+
+            const summaryBody = Object.keys(currentGroupedData).sort().map(dept => {
+                const g = currentGroupedData[dept];
+                const pDiff = g.t2Pay - g.t1Pay;
+                const hDiff = g.t2Hrs - g.t1Hrs;
+                return [
+                    dept,
+                    `$${g.t1Pay.toLocaleString(undefined, {minimumFractionDigits:2})}`,
+                    `$${g.t2Pay.toLocaleString(undefined, {minimumFractionDigits:2})}`,
+                    { content: `${pDiff >= 0 ? '+' : ''}$${pDiff.toLocaleString(undefined, {minimumFractionDigits:2})}`, styles: { textColor: pDiff > 0 ? [220, 38, 38] : [22, 163, 74], fontStyle: 'bold' } },
+                    { content: `${hDiff >= 0 ? '+' : ''}${hDiff.toFixed(1)}`, styles: { textColor: hDiff > 0 ? [220, 38, 38] : [22, 163, 74], fontStyle: 'bold' } }
+                ];
+            });
+
+            doc.autoTable({
+                startY: currentY,
+                head: [['Location/Division', 'W1 Spend', 'W2 Spend', 'Spend Delta', 'Hour Delta']],
+                body: summaryBody,
+                theme: 'striped',
+                headStyles: { fillGray: 240, textColor: 50, fontStyle: 'bold' },
+                styles: { fontSize: 8 },
+                columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' } }
+            });
+
+            currentY = doc.lastAutoTable.finalY + 15;
+            doc.setFontSize(12);
+            doc.setFont(undefined, 'bold');
+            doc.text("2. DETAILED EMPLOYEE BREAKDOWN", 14, currentY);
+            currentY += 6;
+
+            Object.keys(currentGroupedData).sort().forEach(dept => {
+                if (currentY > 250) { doc.addPage(); currentY = 20; }
+                doc.setFontSize(10);
+                doc.setFont(undefined, 'bold');
+                doc.text(dept, 14, currentY);
+                const body = currentGroupedData[dept].emps.map(e => [
+                    e.name + (e.type === 'Salary' ? ' (S)' : ''),
+                    e.w1Reg.toFixed(2),
+                    e.w1OT.toFixed(2),
+                    e.w2Reg.toFixed(2),
+                    e.w2OT.toFixed(2),
+                    `$${e.totalPay.toFixed(2)}`
+                ]);
+                doc.autoTable({
+                    startY: currentY + 2,
+                    head: [['Employee', 'W1 R', 'W1 O', 'W2 R', 'W2 O', 'Total Pay']],
+                    body: body,
+                    theme: 'grid',
+                    styles: { fontSize: 7 },
+                    headStyles: { fillColor: [241, 245, 249], textColor: [71, 85, 105] },
+                    margin: { left: 14 }
+                });
+                currentY = doc.lastAutoTable.finalY + 10;
+            });
+
+            doc.save(`Ownership_Payroll_Report_${date.replace(/\//g, '-')}.pdf`);
+        }
+    </script>
+</body>
+</html>
